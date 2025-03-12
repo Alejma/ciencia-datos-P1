@@ -58,22 +58,23 @@ ORDER BY
     numero_transacciones DESC;
 
 -- iv. Comparación de ventas por mes
--- Esta consulta SQL compara las ventas mensuales en términos de número de ventas, unidades vendidas e importe total.
--- Selecciona el año, mes, número de ventas, unidades vendidas e importe total para cada mes.
--- Utiliza la función EXTRACT para extraer el año y mes de la fecha de la factura.
--- Agrupa los resultados por año y mes y los ordena en orden ascendente según el año y mes.
-SELECT 
-    EXTRACT(YEAR FROM s.invoice_date) AS año,
-    EXTRACT(MONTH FROM s.invoice_date) AS mes,
-    COUNT(s.invoice_no) AS numero_ventas,
-    SUM(s.quantity) AS unidades_vendidas,
-    SUM(s.quantity * s.price) AS importe_total
-FROM 
-    sales s
-GROUP BY 
-    año, mes
-ORDER BY 
-    año, mes;
+-- Esta consulta SQL compara las ventas mensuales de los años 2021, 2022 y 2023.
+-- Selecciona el mes, el importe total de ventas para cada año y el importe total de ventas para cada mes.
+-- Utiliza la función EXTRACT para extraer el mes de la fecha de la factura.
+-- Agrupa los resultados por mes y los ordena en orden ascendente según el mes.
+SELECT
+    EXTRACT(MONTH FROM invoice_date) AS mes,
+    SUM(CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2021
+     THEN quantity * price END) AS "2021",
+    SUM(CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2022 
+    THEN quantity * price END) AS "2022",
+    SUM(CASE WHEN EXTRACT(YEAR FROM invoice_date) = 2023 
+    THEN quantity * price END) AS "2023",
+    SUM(quantity * price) AS total
+FROM sales
+GROUP BY mes
+ORDER BY mes;
+
 
 -- Consulta adicional: Ventas por centro comercial
 -- Esta consulta SQL analiza las ventas por centro comercial en términos de número de ventas, unidades vendidas e importe total.

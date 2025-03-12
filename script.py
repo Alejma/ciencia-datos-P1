@@ -1,5 +1,7 @@
 import psycopg2
 from psycopg2 import sql
+import pandas as pd
+import os
 
 def create_database():
     # Parámetros de conexión 
@@ -42,6 +44,9 @@ def create_database():
         # Crear las tablas
         create_tables(cursor)
         
+        # Cargar datos desde el CSV
+        load_data_from_csv(conn)
+        
         # Cerrar la conexión
         cursor.close()
         conn.close()
@@ -52,37 +57,38 @@ def create_database():
 def create_tables(cursor):
     # Definir las sentencias SQL para crear las tablas
     create_customers_table = """
-    CREATE TABLE customers (
+    CREATE TABLE IF NOT EXISTS customers (
         customer_id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
+        name TEXT DEFAULT NULL,
+        email TEXT DEFAULT NULL,
         gender TEXT NOT NULL,
         age INT NOT NULL CHECK (age > 0)
     );
     """
     
     create_categories_table = """
-    CREATE TABLE categories (
+    CREATE TABLE IF NOT EXISTS categories (
         category_id BIGSERIAL PRIMARY KEY,
         category TEXT UNIQUE NOT NULL
     );
     """
     
     create_payment_methods_table = """
-    CREATE TABLE payment_methods (
+    CREATE TABLE IF NOT EXISTS payment_methods (
         payment_id BIGSERIAL PRIMARY KEY,
         payment_method TEXT UNIQUE NOT NULL
     );
     """
     
     create_shopping_malls_table = """
-    CREATE TABLE shopping_malls (
+    CREATE TABLE IF NOT EXISTS shopping_malls (
         mall_id BIGSERIAL PRIMARY KEY,
         shopping_mall TEXT UNIQUE NOT NULL
     );
     """
     
     create_sales_table = """
-    CREATE TABLE sales (
+    CREATE TABLE IF NOT EXISTS sales (
         invoice_no TEXT PRIMARY KEY,
         customer_id TEXT NOT NULL REFERENCES customers(customer_id) ON DELETE CASCADE,
         category_id BIGINT NOT NULL REFERENCES categories(category_id) ON DELETE CASCADE,
@@ -108,10 +114,112 @@ def create_tables(cursor):
         try:
             cursor.execute(statement)
             print("Tabla creada exitosamente.")
-        except psycopg2.errors.DuplicateTable:
-            print("La tabla ya existe.")
         except Exception as e:
             print(f"Error al crear la tabla: {e}")
+
+def load_data_from_csv(conn):
+    # Ruta al archivo CSV
+    csv_path = os.path.join("dataset", "customer_shopping_data.csv")
+    
+    try:
+        # Cargar el CSV en un DataFrame
+        df = pd.read_csv(csv_path)
+        print(f"CSV cargado correctamente: {len(df)} registros encontrados.")
+        
+        cursor = conn.cursor()
+        
+        # Insertar categorías únicas
+        unique_categories = df['category'].unique()
+        for category in unique_categories:
+            try:
+                cursor.execute(
+                    "INSERT INTO categories (category) VALUES (%s) ON CONFLICT (category) DO NOTHING",
+                    (category,)
+                )
+            except Exception as e:
+                print(f"Error al insertar categoría {category}: {e}")
+        
+        # Insertar métodos de pago únicos
+        unique_payment_methods = df['payment_method'].unique()
+        for payment_method in unique_payment_methods:
+            try:
+                cursor.execute(
+                    "INSERT INTO payment_methods (payment_method) VALUES (%s) ON CONFLICT (payment_method) DO NOTHING",
+                    (payment_method,)
+                )
+            except Exception as e:
+                print(f"Error al insertar método de pago {payment_method}: {e}")
+        
+        # Insertar centros comerciales únicos
+        unique_malls = df['shopping_mall'].unique()
+        for mall in unique_malls:
+            try:
+                cursor.execute(
+                    "INSERT INTO shopping_malls (shopping_mall) VALUES (%s) ON CONFLICT (shopping_mall) DO NOTHING",
+                    (mall,)
+                )
+            except Exception as e:
+                print(f"Error al insertar centro comercial {mall}: {e}")
+        
+        # Insertar clientes únicos con name y email como NULL por defecto
+        unique_customers = df[['customer_id', 'gender', 'age']].drop_duplicates()
+        for _, customer in unique_customers.iterrows():
+            try:
+                cursor.execute(
+                    "INSERT INTO customers (customer_id, name, email, gender, age) VALUES (%s, NULL, NULL, %s, %s) ON CONFLICT (customer_id) DO NOTHING",
+                    (customer['customer_id'], customer['gender'], customer['age'])
+                )
+            except Exception as e:
+                print(f"Error al insertar cliente {customer['customer_id']}: {e}")
+        
+        # Insertar ventas
+        for _, row in df.iterrows():
+            try:
+                # Obtener IDs de referencia
+                cursor.execute("SELECT category_id FROM categories WHERE category = %s", (row['category'],))
+                category_id = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT payment_id FROM payment_methods WHERE payment_method = %s", (row['payment_method'],))
+                payment_id = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT mall_id FROM shopping_malls WHERE shopping_mall = %s", (row['shopping_mall'],))
+                mall_id = cursor.fetchone()[0]
+                
+                # Formatear la fecha
+                try:
+                    # Intentar convertir fecha si es necesario
+                    invoice_date = pd.to_datetime(row['invoice_date'])
+                except:
+                    invoice_date = row['invoice_date']
+                
+                # Insertar venta
+                cursor.execute(
+                    """
+                    INSERT INTO sales 
+                    (invoice_no, customer_id, category_id, payment_id, mall_id, quantity, price, invoice_date) 
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (invoice_no) DO NOTHING
+                    """,
+                    (
+                        row['invoice_no'], 
+                        row['customer_id'], 
+                        category_id, 
+                        payment_id, 
+                        mall_id, 
+                        row['quantity'], 
+                        row['price'], 
+                        invoice_date
+                    )
+                )
+            except Exception as e:
+                print(f"Error al insertar venta {row['invoice_no']}: {e}")
+        
+        conn.commit()
+        print("Datos cargados correctamente en la base de datos.")
+        
+    except Exception as e:
+        print(f"Error al cargar datos desde CSV: {e}")
+        conn.rollback()
 
 if __name__ == "__main__":
     create_database()
